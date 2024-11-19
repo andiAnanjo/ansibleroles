@@ -1,0 +1,16 @@
+[Unit]
+Description=Run custom script after switching to rescue.target
+Requires=rescue.target boot.mount
+After=rescue.target boot.mount
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/bash /root/run-in-rescue-target.sh
+WorkingDirectory=/root
+StandardOutput= tty
+StandardError= tty
+RemainAfterExit=yes
+
+[Install]
+WantedBy=rescue.target

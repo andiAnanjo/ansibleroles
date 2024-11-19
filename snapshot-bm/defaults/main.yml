@@ -1,0 +1,16 @@
+---
+
+repos: "rhel-7-server-optional-rpms,rhel-7-server-extras-rpms"
+pkgs:
+  - lvm2-python-boom
+  - rsync
+
+leapp_size: 6
+
+rescue_target:
+  - dir: /root
+    mode: 755
+    files: [run-in-rescue-target.sh]
+  - dir: /etc/systemd/system
+    mode: 644
+    files: [leapp-rescue-target.service]

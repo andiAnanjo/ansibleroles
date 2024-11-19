@@ -1,0 +1,19 @@
+---
+
+admin_mail:
+  - receiver: "UnixOpsFFMcentral@ztb.icb.commerzbank.com"
+    subject: "Info: Snapshot {{ ansible_date_time.iso8601 }} for {{ inventory_hostname_short }} on {{ env }}-{{ platform }}"
+    body: "Created by IPU Phase1"
+    snap_location: "ffm"
+  - receiver: "UnixOpsLondon@commerzbank.com"
+    subject: "Info: Snapshot {{ ansible_date_time.iso8601 }} for {{ inventory_hostname_short }} on {{ env }}-{{ platform }}"
+    body: "Created by IPU Phase1"
+    snap_location: "ldn"
+  - receiver: "UnixOpsSingapore@commerzbank.com"
+    subject: "Info: Snapshot {{ ansible_date_time.iso8601 }} for {{ inventory_hostname_short }} on {{ env }}-{{ platform }}"
+    body: "Created by IPU Phase1"
+    snap_location: "sgp"
+  - receiver: "UnixOpsAmericas@commerzbank.com"
+    subject: "Info: Snapshot {{ ansible_date_time.iso8601 }} for {{ inventory_hostname_short }} on {{ env }}-{{ platform }}"
+    body: "Created by IPU Phase1"
+    snap_location: "ny"

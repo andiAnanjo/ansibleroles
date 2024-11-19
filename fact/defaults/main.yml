@@ -1,0 +1,17 @@
+---
+
+fact:
+  free_space: 5
+  partition_to_check: "/var"
+  cache_file: /etc/cbk/config/cache
+  expected_os_version: "7.9"
+  expected_os_distribution: "RedHat"
+  portal_parameter:
+    - platform
+
+  expected_cloud_provider:
+    gcp: "gcp,Google,Google Compute Engine"
+    vmw: "vmw,vmware,Vmware,VMware Virtual Platform"
+    azr: "azr, azure,Virtual Machine"
+    dell: "dell,Dell,Dell Inc.,PowerEdge R740,PowerEdge R730,PowerEdge R740xd"
+    HP: "hp,HP,ProLiant DL380 Gen9"

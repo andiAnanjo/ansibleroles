@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  author: Ansible Automation Team
+  description: Add host directly to AAP inventory. Since the inventory is sourced from Git, those entries will not be persistent.
+  company: Commerzbank
+  role_name: ping
+
+  license: BSD-3-Clause
+
+  min_ansible_version: '2.9'
+
+  # This is a unifersal role and not releated to any Platform
+
+  galaxy_tags:
+    - inventory
+    - provisioning
+
+dependencies: []

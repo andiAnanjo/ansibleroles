@@ -1,0 +1,75 @@
+---
+
+- name: Populate service facts
+  ansible.builtin.service_facts:
+
+- name: Gather facts on listening ports
+  community.general.listen_ports_facts:
+
+- name: gather facts
+  ansible.builtin.set_fact:
+    HOSTNAME: "{{ inventory_hostname }}"
+    PLATFORM: "{{ platform | lower }}"
+    ENV: "{{ env }}"
+    OS_DISTRIBUTION: "{{ ansible_distribution }}"
+    OS_VERSION: "{{ ansible_distribution_version }}"
+    PRODUCT_NAME: "{{ ansible_facts.product_name }}"
+    SYSTEM_VENDOR: "{{ ansible_facts.system_vendor }}"
+    SERVICES: "{{ ansible_facts.services | json_query('*') | list }}"
+    PORTS_TCP: "{{ ansible_facts.tcp_listen }}"
+    PORTS_UDP: "{{ ansible_facts.udp_listen }}"
+
+- ansible.builtin.fail:
+    msg: "Variable '{{ item }}' is not defined"
+  with_items: "{{ fact.portal_parameter }}"
+  when: item not in hostvars[inventory_hostname]
+
+#- name: dispatch os-dist. and version {{ fact.expected_os_version }}
+#  ansible.builtin.fail:
+#    msg: "ExpectedOS version is {{ fact.expected_os_version }}, but got {{ OS_VERSION }} !"
+#  when: OS_VERSION != fact.expected_os_version or OS_DISTRIBUTION != fact.expected_os_distribution
+
+- name: expected cloud provider {{ fact.expected_cloud_provider[PLATFORM] }}, but got {{ PLATFORM }}
+  ansible.builtin.fail:
+  when: PLATFORM | upper not in fact.expected_cloud_provider[PLATFORM] |upper
+
+- name: given cloud provider {{ fact.expected_cloud_provider[PLATFORM] }} does NOT matched from host **{{ PRODUCT_NAME }}**
+  ansible.builtin.fail:
+  when: PRODUCT_NAME | upper not in fact.expected_cloud_provider[PLATFORM] | upper
+
+- name: getting size of {{ fact.partition_to_check }} partition
+  ansible.builtin.shell: "df --block-size 1g {{ fact.partition_to_check }} --output=avail | tail -1"
+  register: free_space
+
+- ansible.builtin.fail:
+    msg: Clean some space. You will need at least {{ fact.free_space }} GB of free space to continue
+  when: free_space.stdout | float < fact.free_space
+
+- name: jsonize facts
+  ansible.builtin.set_fact:
+    FACT: "{{ { 'Platform': PLATFORM, 'step': 'PREPARE', 'host_env': ENV, 'hostname': HOSTNAME, 'os_distribution': OS_DISTRIBUTION, 'os_version': OS_VERSION, 'services': SERVICES, 'ports_tcp': PORTS_TCP, 'ports_udp': PORTS_UDP} }}"
+
+- name: print facts
+  ansible.builtin.debug:
+    msg: "{{ FACT }}"
+
+- name: post {{ HOSTNAME, PLATFORM }} facts to {{ leapp_backend_base_url }}/v1/ansible/fact
+  ansible.builtin.uri:
+    url: "{{ leapp_backend_base_url }}/v1/ansible/fact"
+    method: POST
+    body_format: json
+    headers:
+      Content-Type: "application/json"
+      Charset: "UTF-8"
+      Authorization: "Bearer {{ access_token }}"
+    body: |
+      {{ FACT }}
+    status_code: 202
+    return_content: true
+  register: response
+  delegate_to: localhost
+  become: false
+
+- ansible.builtin.fail:
+    msg: Http status code == 202
+  when: response.status != 202

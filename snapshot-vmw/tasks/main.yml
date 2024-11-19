@@ -1,0 +1,150 @@
+---
+
+- name: set facts
+  ansible.builtin.set_fact:
+      SNAPSHOT_NAME: "{{ ansible_date_time.iso8601 }}"
+      HOSTNAME: "{{ inventory_hostname | split('.') | first }}"
+      ENV: "{{ env| lower }}"
+      LOCATION: "{{ location| lower }}"
+
+- name: get vmw credentials {{ leapp_backend_base_url }}/v1/ansible/vmw/env/{{ ENV }}/location/{{ LOCATION }}/credentials
+  ansible.builtin.uri:
+    url: "{{ leapp_backend_base_url }}/v1/ansible/vmw/env/{{ ENV }}/location/{{ LOCATION }}/credentials"
+    method: GET
+    body_format: json
+    headers:
+      Content-Type: "application/json"
+      Charset: "UTF-8"
+      Authorization: "Bearer {{ access_token }}"
+    status_code: 200
+    timeout: 100
+    return_content: true
+  register: response_credentials
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: gather information about all datacenters
+  community.vmware.vmware_datacenter_info:
+    hostname: "{{ response_credentials.json.Hostname }}"
+    username: "{{ response_credentials.json.Username }}"
+    password: "{{ response_credentials.json.Password }}"
+    validate_certs: false
+  delegate_to: localhost
+  become: false
+  register: all_the_clusters
+  no_log: true
+
+- name: show datacenters [all_the_clusters]
+  debug:
+    msg: "{{ all_the_clusters }}"
+
+- name: gather information about folder for the guest vm
+  community.vmware.vmware_guest_find:
+    hostname: "{{ response_credentials.json.Hostname }}"
+    username: "{{ response_credentials.json.Username }}"
+    password: "{{ response_credentials.json.Password }}"
+    name: "{{ item }}"
+    validate_certs: false
+  delegate_to: localhost
+  become: false
+  register: vm_folder
+  loop:
+    - "{{ inventory_hostname | split('.') | first | lower}}"
+    - "{{ inventory_hostname | split('.') | first | upper}}"
+  ignore_errors: true
+
+- name: Set facts
+  ansible.builtin.set_fact:
+    VM_FOLDER: "{{ item.folders[0] }}"
+    DATA_CENTER: "{{ item.folders[0].split('/')[1] }}"
+    VM_GUEST_NAME: "{{ item.invocation.module_args.name }}"
+  loop: "{{ vm_folder.results }}"
+  when: item.folders is defined
+
+- name: create a snapshot  (NOT NY) {{ SNAPSHOT_NAME }}  for {{ HOSTNAME }} {{ location }} {{ response_credentials.json.Hostname }} {{ all_the_clusters['datacenter_info'][0]['name'] }}
+  community.vmware.vmware_guest_snapshot:
+    hostname: "{{ response_credentials.json.Hostname }}"
+    username: "{{ response_credentials.json.Username }}"
+    password: "{{ response_credentials.json.Password }}"
+    datacenter: "{{ DATA_CENTER }}"
+    folder: "{{ VM_FOLDER }}"
+    name: "{{ VM_GUEST_NAME }}"
+    state: present
+    snapshot_name: "{{ SNAPSHOT_NAME }}"
+    description: "Created by Leapp-Ansible"
+    validate_certs: false
+  delegate_to: localhost
+  become: false
+  register: create_snapshot
+  no_log: false
+  when: location | upper != 'NY'
+
+- name: create a snapshot (NY) {{ SNAPSHOT_NAME }}  for {{ inventory_hostname }}
+  community.vmware.vmware_guest_snapshot:
+    hostname: "{{ response_credentials.json.Hostname }}"
+    username: "{{ response_credentials.json.Username }}"
+    password: "{{ response_credentials.json.Password }}"
+    datacenter: "{{ all_the_clusters['datacenter_info'][0]['name'] }}"
+    folder: "/{{ all_the_clusters['datacenter_info'][0]['name'] }}/vm/"
+    name: "{{ inventory_hostname }}"
+    state: present
+    snapshot_name: "{{ SNAPSHOT_NAME }}"
+    description: "Created by Leapp-Ansible"
+    validate_certs: false
+  delegate_to: localhost
+  become: false
+  register: create_snapshot
+  no_log: false
+  when: location | upper == 'NY'
+
+- name: show execution result of 'create snapshot'
+  ansible.builtin.debug:
+    msg: "{{ create_snapshot }}"
+
+- name: gather snapshot information about the virtual machine in the given vCenter
+  community.vmware.vmware_guest_snapshot_info:
+    hostname: "{{ response_credentials.json.Hostname }}"
+    username: "{{ response_credentials.json.Username  }}"
+    password: "{{ response_credentials.json.Password  }}"
+    datacenter: "{{ all_the_clusters['datacenter_info'][0]['name'] }}"
+    folder: "/{{ all_the_clusters['datacenter_info'][0]['name'] }}/vm/"
+    name: "{{ inventory_hostname }}"
+    validate_certs: false
+  delegate_to: localhost
+  become: false
+  register: snapshot_info
+  no_log: true
+  when: location | upper == 'NY'
+
+- name: gather snapshot information about the virtual machine in the given vCenter
+  community.vmware.vmware_guest_snapshot_info:
+    hostname: "{{ response_credentials.json.Hostname }}"
+    username: "{{ response_credentials.json.Username  }}"
+    password: "{{ response_credentials.json.Password  }}"
+    datacenter: "{{ DATA_CENTER }}"
+    folder: "{{ VM_FOLDER }}"
+    name: "{{ VM_GUEST_NAME }}"
+    validate_certs: false
+  delegate_to: localhost
+  become: false
+  register: snapshot_info
+  no_log: true
+  when: location | upper != 'NY'
+
+- name: post snapshots {{ leapp_backend_base_url }}/v1/ansible/vmw/snapshot/{{ inventory_hostname }}
+  ansible.builtin.uri:
+    url: "{{ leapp_backend_base_url }}/v1/ansible/vmw/snapshot/{{ inventory_hostname }}"
+    method: POST
+    body_format: json
+    headers:
+      Content-Type: "application/json"
+      Charset: "UTF-8"
+      Authorization: "Bearer {{ access_token }}"
+    body: |
+      {{ snapshot_info }}
+    status_code: 202
+    timeout: 100
+    return_content: true
+  delegate_to: localhost
+  become: false

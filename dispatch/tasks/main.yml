@@ -1,0 +1,98 @@
+---
+
+- name: include role ping
+  ansible.builtin.include_role:
+    name: ping
+    tasks_from: main.yml
+
+- name: include role fact
+  ansible.builtin.include_role:
+    name: fact
+    tasks_from: main.yml
+
+- name: Include role enlarge_volumes
+  ansible.builtin.include_role:
+    name: enlarge-volumes
+    tasks_from: main.yml
+
+- name: include role snapshot-azr-gcp
+  ansible.builtin.include_role:
+    name: snapshot-azr-gcp
+    tasks_from: main.yml
+  when: "platform | lower in 'azr,gcp'"
+
+- name: include role snapshot-vmw
+  ansible.builtin.include_role:
+    name: snapshot-vmw
+    tasks_from: main.yml
+  when: "platform | lower == 'vmw'"
+
+- name: include role snapshot-bm
+  ansible.builtin.include_role:
+    name: snapshot-bm
+    tasks_from: main.yml
+  when: "platform | lower in 'dell,hp'"
+
+- name: Inform admins about snapshot via mail
+  community.general.mail:
+    sender: USO Linux
+    to: '{{ mailer.receiver }}'
+    subject: '{{ mailer.subject }}'
+    body: '{{ mailer.body }}'
+    host: mrelay.zit.commerzbank.com
+    port: 25
+  delegate_to: localhost
+  loop: "{{ admin_mail}}"
+  loop_control:
+    loop_var: mailer
+  when: mailer.snap_location == location | lower
+  ignore_errors: true
+
+- name: include role leappsched
+  ansible.builtin.include_role:
+    name: leappsched
+    tasks_from: main.yml
+
+- name: Set ulimit for number of files
+  ansible.builtin.blockinfile:
+    path: /etc/security/limits.conf
+    create: true
+    owner: root
+    group: root
+    mode: '644'
+    insertafter: "EOF"
+    state: present
+    block: |
+      * soft nofile 32768
+      * hard nofile 32768
+
+- name: Get systemwide flimit parameter
+  ansible.builtin.command: /usr/sbin/sysctl -n fs.file-max
+  register: file_max_value
+
+- block:
+  - name: save the value for fs.file-max
+    ansible.builtin.copy:
+      content: |
+        { "file_max": "{{ file_max_value.stdout }}" }
+      dest: /etc/leapp-vars.json
+      mode: 0644
+      group: root
+      owner: root
+
+  - name: copy sysctl.conf
+    ansible.builtin.copy:
+      src: /etc/sysctl.conf
+      dest: /etc/sysctl.conf.BeforePrepare
+      remote_src: true
+      mode: '0644'
+      owner: root
+      group: root
+
+  - name: Set fs.file-max via sysctl
+    ansible.posix.sysctl:
+      name: fs.file-max
+      value: '65536'
+      state: present
+      reload: true
+  when: file_max_value.stdout | float < 65536

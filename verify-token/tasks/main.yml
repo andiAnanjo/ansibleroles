@@ -1,0 +1,16 @@
+---
+
+- name: verify token {{ leapp_backend_base_url }}/v1/ansible/verify/token
+  ansible.builtin.uri:
+    url: "{{ leapp_backend_base_url }}/v1/ansible/verify/token"
+    method: GET
+    body_format: json
+    headers:
+      Content-Type: "application/json"
+      Charset: "UTF-8"
+      Authorization: "Bearer {{ access_token }}"
+    status_code: 200
+    timeout: 100
+    return_content: true
+  delegate_to: localhost
+  become: false

@@ -1,0 +1,227 @@
+---
+
+- name: install some packages
+  ansible.builtin.yum:
+    name: "{{ item }}"
+    state: present
+    update_cache: true
+    enablerepo: "{{ repos }}"
+  loop: "{{ pkgs }}"
+
+- name: Blacklist some drivers
+  ansible.builtin.blockinfile:
+    path: /etc/modprobe.d/blacklist.conf
+    create: true
+    owner: root
+    group: root
+    mode: '644'
+    insertafter: "EOF"
+    state: present
+    block: |
+      install mptbase /bin/false
+      install mptctl /bin/false
+      install mpt2sas /bin/false
+      install raid_class /bin/false
+      install scsi_transport_sas /bin/false
+      install btrfs /bin/false
+
+- name: snapshot list
+  ansible.builtin.shell: "boom list"
+  register: snapshot_list
+
+- name: print snapshots
+  ansible.builtin.debug:
+    msg: "Snapshots: {{ snapshot_list.stdout | trim }}"
+
+- name: check if locking files for snapshot exists
+  ansible.builtin.stat:
+    path: /etc/leapp_snapshot.lock
+  register: snap_lock_out
+
+- name: Message when snapshot exists
+  ansible.builtin.debug:
+    msg: "YOU HAVE RUN THIS STEP BEFORE, NOTHING WILL HAPPEN"
+  when: snap_lock_out.stat.exists
+
+- name: Snaphot block
+  block:
+    - name: Get boot-device
+      when: item.mount == "/"
+      set_fact:
+        rootdev: "{{ item.device }}"
+      loop: "{{ ansible_mounts }}"
+
+    - name: get lv-name
+      ansible.builtin.shell: "lvs {{ rootdev }} -o 'lv_name' --noheadings"
+      register: lv_name_out
+
+    - name: get vg-name
+      ansible.builtin.shell: "lvs {{ rootdev }} -o 'vg_name' --noheadings"
+      register: vg_name_out
+
+    - name: declare some volume manager variables
+      set_fact:
+        lv_name: "{{ lv_name_out.stdout | trim }}"
+        vg_name: "{{ vg_name_out.stdout | trim }}"
+
+    - name: get free space in volume group
+      ansible.builtin.shell: "vgs {{ vg_name_out.stdout | trim }} --units g --noheadings -o vg_free --nosuffix"
+      register: vg_free_out
+
+    - name: get size for snapshot
+      #  ansible.builtin.shell: 'lvdisplay {{ rootdev }} --units g --noheadings -C --nosuffix --separator ";" | cut -d";" -f4'
+      ansible.builtin.shell: "lvs {{ rootdev }} --units g --nosuffix --noheadings -o lv_size"
+      register: lv_size_out
+
+    - name: get date for snapshot name
+      ansible.builtin.shell: "date +%m%d%H%M%Y"
+      register: snap_date_out
+
+    - name: get free space in root volume
+      ansible.builtin.shell: "df -BG / | awk 'NR==2 {print $4}' | sed 's/G//'"
+      register: rootvol_free_out
+
+    - name: get used space in root volume
+      ansible.builtin.shell: "df -BG / | awk 'NR==2 {print $3}' | sed 's/G//'"
+      register: rootvol_use_out
+
+    - name: get used space in /var volume
+      ansible.builtin.shell: "df -BG /var | awk 'NR==2 {print $3}' | sed 's/G//'"
+      register: varvol_use_out
+
+    - name: get used space in log volume
+      ansible.builtin.shell: "df -BG /var/log | awk 'NR==2 {print $3}' | sed 's/G//'"
+      register: logvol_use_out
+
+    - name: get used space in audit volume
+      ansible.builtin.shell: "df -BG /var/log/audit | awk 'NR==2 {print $3}' | sed 's/G//'"
+      register: auditvol_use_out
+
+    - name: declare more volume manager variables
+      ansible.builtin.set_fact:
+        vg_free: "{{ vg_free_out.stdout | trim }}"
+        lv_size: "{{ lv_size_out.stdout | trim }}"
+        rootvol_free: "{{ rootvol_free_out.stdout | trim }}"
+        rootvol_use: "{{ rootvol_use_out.stdout | trim }}"
+        varvol_use: "{{ varvol_use_out.stdout | trim }}"
+        logvol_use: "{{ logvol_use_out.stdout | trim }}"
+        auditvol_use: "{{ auditvol_use_out.stdout | trim }}"
+        sum_up: "{{ varvol_use_out.stdout | trim  | int + logvol_use_out.stdout | trim | int  + auditvol_use_out.stdout | trim  | int }}"
+        SNAPSHOT_NAME: "{{ lv_name_out.stdout | trim  + '-snapshot' }}-{{ snap_date_out.stdout }}"
+        HOSTNAME: "{{ inventory_hostname | split('.') | first }}"
+        snap_date: "{{ snap_date_out.stdout }}"
+
+    - name: print all available mount infos
+      ansible.builtin.debug:
+        msg:
+          - "ROOTDEV: {{ rootdev }}"
+          - "LVNAME: {{ lv_name }}"
+          - "VGNAME: {{ vg_name }}"
+          - "VGFREE: {{ vg_free }}"
+          - "LVSIZE: {{ lv_size }}"
+          - "SNAPSHOT_NAME: {{ SNAPSHOT_NAME }}"
+          - "SNAPDATE: {{ snap_date }}"
+          - "ROOTVOLFREE: {{ rootvol_free }}"
+          - "ROOTVOLUSE: {{ rootvol_use }}"
+          - "VARVOLUSE: {{ varvol_use }}"
+          - "LOGVOLUSE: {{ logvol_use }}"
+          - "AUDITVOLUSE: {{ auditvol_use }}"
+          - "SUMUP: {{ sum_up }}"
+
+    - name: Check if size in {{ vg_name }} is enough for snap and the merge of system vols into {{ lv_name }}
+      ansible.builtin.fail:
+        msg: "NOT ENOUGH SPACE SPACE IN VOLUMEGROUP {{ vg_name }} FOR SNAPSHOT"
+      when:  (( lv_size | int  + sum_up | int + leapp_size | int ) * 2 ) >=  vg_free | int
+
+    - name: resize root partition
+      community.general.lvol:
+        vg: "{{ vg_name }}"
+        lv: "{{ lv_name }}"
+        size: "+{{ sum_up | int + leapp_size | int }}g"
+        resizefs: true
+        state: present
+        force: true
+      when: rootvol_free | int <= ( sum_up | int + leapp_size | int )
+
+    ### the next five tasks make the system recoverable via boom
+    - name: Deploy files for systemd service
+      ansible.builtin.copy:
+        src: "files/{{item.1}}"
+        dest: "{{item.0.dir}}"
+        mode: "{{item.0.mode}}"
+        owner: root
+        group: root
+      loop: "{{ rescue_target|subelements('files',) }}"
+
+    - name: Enable leapp-rescue-target service
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+        name: leapp-rescue-target
+        enabled: true
+
+    - name: Switch to rescue target (systemd_service module does not work stable for this)
+      ansible.builtin.shell: "/usr/bin/systemctl isolate rescue.target"
+      async: 60
+      poll: 0
+      ignore_errors: true
+
+    - name: Wait for the reboot to complete if there was a change.
+      ansible.builtin.wait_for_connection:
+        delay: 60
+        sleep: 5
+        timeout: 1800
+
+    - name: Disable leapp-rescue-target service
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+        name: leapp-rescue-target
+        enabled: false
+
+     ## If snapshot does NOT exist then create one, else do nothing
+    - block:
+      - name: create snapshot {{ SNAPSHOT_NAME }}
+        community.general.lvol:
+          vg: "{{ vg_name }}"
+          lv: "{{ lv_name }}"
+          snapshot: "{{ SNAPSHOT_NAME }}"
+          size: "{{ lv_size }}g"
+          state: present
+          force: true
+
+      - name: Create boom profile
+        ansible.builtin.shell: "boom profile create --from-host --uname-pattern el7"
+
+      - name: Connect boom to snapshot {{ vg_name }}/{{ SNAPSHOT_NAME }}
+        ansible.builtin.shell: 'boom create --title "Snap-for-Leapp-{{ snap_date }}" --rootlv "{{ vg_name }}"/"{{ SNAPSHOT_NAME }}"'
+
+      - name: Update grub2.cfg
+        ansible.builtin.shell: "grub2-mkconfig > /boot/grub2/grub.cfg"
+
+      - name: gather snapshot infos to post
+        set_fact:
+          snapshot_info: "{{ {'hostname': HOSTNAME, 'description': 'Created by Leapp-Ansible', 'name': SNAPSHOT_NAME, 'quiesced': true, 'state': 'created', 'creation_time': ansible_date_time.iso8601 }  }}"
+
+      - name: post snapshots {{ leapp_backend_base_url }}/v1/ansible/del/snapshot/{{ inventory_hostname }}
+        ansible.builtin.uri:
+          url: "{{ leapp_backend_base_url }}/v1/ansible/dell/snapshot/{{ inventory_hostname }}"
+          method: POST
+          body_format: json
+          headers:
+            Content-Type: "application/json"
+            Charset: "UTF-8"
+            Authorization: "Bearer {{ access_token }}"
+          body: |
+            {{ snapshot_info }}
+          status_code: 202
+          timeout: 100
+          return_content: true
+        register: response_credentials
+        delegate_to: localhost
+        become: false
+
+      - name: Create lock file to block additional attemts to snap
+        ansible.builtin.file:
+          path: /etc/leapp_snapshot.lock
+          mode: '0744'
+          state: touch
+  when: not snap_lock_out.stat.exists

@@ -1,0 +1,10 @@
+---
+
+# minfree must be in bytes
+minvolfree:
+  - vol_name: "/"
+    min_free: 2000000000
+    add_size: "+2g"
+  - vol_name: "/var"
+    min_free: 4000000000
+    add_size: "+4g"

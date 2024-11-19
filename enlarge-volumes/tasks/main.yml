@@ -1,0 +1,51 @@
+---
+
+- name: Do some house keeping on disks
+  ansible.builtin.debug:
+    msg: "FIRST, FREE SOME SPACE"
+
+- name: Clean yum cache
+  ansible.builtin.shell: "/bin/yum clean all"
+  ignore_errors: true
+
+- name: Clean all repos not handeled by yum clean all
+  ansible.builtin.shell: "/bin/rm -rf /var/cache/yum/x86_64/7Server/*"
+  ignore_errors: true
+
+- name: Delete old kernels
+  ansible.builtin.shell: "/bin/package-cleanup --oldkernels --count=1 -y"
+  ignore_errors: true
+
+- name: Disk handling
+  block:
+    - name: Iterate over minvolfree and check against ansible_mounts
+      community.general.lvol:
+        vg: "{{ mount.device | basename | split('-') | first }}"
+        lv: "{{ mount.device | basename | split('-') | last }}"
+        size: "{{ vol.add_size }}"
+        resizefs: true
+        state: present
+        force: true
+      loop: "{{ minvolfree }}"
+      loop_control:
+        loop_var: vol
+      when:
+        - mount.mount == vol.vol_name
+        - mount.size_available | int < vol.min_free
+  rescue:
+    - name: Get and set name of root device
+      ansible.builtin.set_fact:
+        root_vg: "{{ ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='device') | first | basename | split('-') | first }}"
+
+    - name: Get size of root volume group
+      ansible.builtin.set_fact:
+        root_vg_free: "{{ ansible_lvm.vgs[root_vg].free_g }}"
+
+    - name: Stop here before anything has changed on the machine
+      ansible.builtin.fail:
+        msg: "YOU HAVE {{ root_vg_free }} GB FREE SPACE IN VOLUME GROUP {{ root_vg }} YOU NEED AT LEAST 6 GB"
+
+  vars:
+    - mount: "{{ ansible_mounts | selectattr('mount', 'equalto', vol.vol_name) | first }}"
+    - vol_group: "{{ mount.device | basename | split('-') | first }}"
+  when: "platform | lower not in 'dell,hp'"

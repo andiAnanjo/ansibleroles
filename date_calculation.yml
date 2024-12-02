@@ -1,0 +1,42 @@
+---
+
+- hosts: localhost
+  gather_facts: true
+  become: true
+
+  vars:
+    fact_date: "{{ ansible_date_time.iso8601 }}"
+    date1: '2022-11-15T03:23:13.6869568Z'
+    date2: '2021-12-15T16:06:24.400087Z'
+    date3: '2024-09-19T11:08:42Z'
+    date4: '2024-11-19'
+    date5: '2024-11-29'
+    date1_short: '{{ date1|regex_replace("([^.]+)(\.\d{6})(\d*)(.+)", "\1\2\4") }}' # shorten to microseconds
+    iso8601format: '%Y-%m-%dT%H:%M:%S.%fZ'
+    iso8601format2: '%Y-%m-%dT%H:%M:%SZ'
+    iso8601format3: '%Y-%m-%d'
+    date_diff_isoed: '{{ (date1_short | to_datetime(iso8601format) - date2 | to_datetime(iso8601format)).total_seconds() }}'
+    date_diff_isoed2: '{{ (fact_date | to_datetime(iso8601format2) - date3 | to_datetime(iso8601format2)) }}'
+    only_date1: "{{ (fact_date | to_datetime(iso8601format2)).strftime('%Y-%m-%d') }}"
+    only_date2: "{{ (date3 | to_datetime(iso8601format2)).strftime('%Y-%m-%d') }}"
+    date_diff_final1: "{{ date5 | to_datetime(iso8601format3) - date4 | to_datetime(iso8601format3) }}"
+    date_diff_final2: " {{ (only_date1|to_datetime('%Y-%m-%d') - only_date2|to_datetime('%Y-%m-%d')).days }}"
+#    date_diff_final3: "{{ ((fact_date | to_datetime(iso8601format2)).strftime('%Y-%m-%d') - (date3 | to_datetime(iso8601format2)).strftime('%Y-%m-%d')).days }}"
+
+  tasks:
+  - name: Print snapshot infos
+    ansible.builtin.debug:
+      msg:
+        - "FACT_DATE: {{ fact_date }}"
+        - "DATE-1: {{ date1 }}"
+        - "DATE-2: {{ date2 }}"
+        - "DATE-3: {{ date3 }}"
+        - "DATE1_SHORT: {{ date1_short }}"
+        - "DATE_DIFF: {{ date_diff_isoed }}"
+        - "DATE_DIFF2: {{ date_diff_isoed2 }}"
+        - "ONLY_DATE1: {{ only_date1 }}"
+        - "ONLY_DATE2: {{ only_date2 }}"
+        - "DATE_DIFF_FINAL1: {{ date_diff_final1 }}"
+        - "DATE_DIFF_FINAL2: {{ date_diff_final2 }}"
+#        - "DATE_DIFF_FINAL3: {{ date_diff_final3 }}"
+
